@@ -1,0 +1,43 @@
+# --- Rust / Cargo ---------------------------------------------------------
+/target/
+**/*.rs.bk
+/coverage/
+*.profraw
+*.profdata
+
+# --- Build and release artifacts -----------------------------------------
+/dist/
+/android/build/
+/android/third_party/*.aar
+*.apk
+*.aab
+*.ap_
+*.idsig
+*.dex
+
+# --- Signing keys ---------------------------------------------------------
+# Never commit production keys. The shared development key below is required
+# by the default `make apk` and by the CI workflow.
+*.jks
+*.keystore
+!android/kumir.keystore
+
+# --- Editors and IDEs -----------------------------------------------------
+.idea/
+.vscode/
+.fleet/
+*.iml
+*.swp
+*.swo
+*~
+
+# --- OS files -------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Local logs and environment ------------------------------------------
+*.log
+.env
+.env.*
+!.env.example

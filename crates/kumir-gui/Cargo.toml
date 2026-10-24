@@ -1,0 +1,42 @@
+[package]
+name = "kumir-gui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Modern integrated development environment for the Kumir language"
+
+[[bin]]
+name = "kumir-ide"
+path = "src/main.rs"
+
+[lib]
+name = "kumir_gui"
+path = "src/lib.rs"
+crate-type = ["lib", "cdylib"]
+
+[target.'cfg(target_os = "android")'.dependencies]
+winit = { version = "0.30", default-features = false, features = [
+    "android-game-activity",
+] }
+android_logger = "0.15"
+log = "0.4"
+jni = "0.22"
+
+[dependencies]
+kumir-core.workspace = true
+eframe = { version = "0.37", default-features = false, features = [
+    "glow",
+    "default_fonts",
+    "x11",
+    "wayland",
+    "system_fonts",
+    "clipboard",
+    "links",
+    "android-game-activity",
+] }
+egui = "0.37"
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+arboard = "3.7"

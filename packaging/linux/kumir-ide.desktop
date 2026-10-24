@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=КуМир
+Name[en]=Kumir
+GenericName=Programming environment
+GenericName[ru]=Среда программирования
+Comment=Modern Kumir 2 IDE and interpreter
+Comment[ru]=Современная среда программирования КуМир 2
+Exec=kumir-ide %f
+TryExec=kumir-ide
+Icon=kumir-ide
+Terminal=false
+Categories=Education;Development;IDE;
+Keywords=kumir;programming;education;алгоритмы;программирование;
+MimeType=text/x-kumir;application/x-kumir-field;
+StartupNotify=true

@@ -1,0 +1,21 @@
+# Cargo aliases and cross-compilation settings.
+#
+# Desktop builds do not need this file, but it makes cross-compiling the
+# Windows package from Linux/macOS work out of the box (provided that the
+# mingw-w64 cross toolchain is installed). See docs/BUILD.md.
+
+[alias]
+ide = "run -p kumir-gui --"
+cli = "run -p kumir-cli --"
+t = "test --workspace"
+
+[target.x86_64-pc-windows-gnu]
+linker = "x86_64-w64-mingw32-gcc"
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.i686-pc-windows-gnu]
+linker = "i686-w64-mingw32-gcc"
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.'cfg(all(windows, target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]

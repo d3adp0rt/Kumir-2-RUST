@@ -1,0 +1,15 @@
+[package]
+name = "kumir-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Command-line runner for Kumir 2 programs (kumir-run)"
+
+[[bin]]
+name = "kumir-run"
+path = "src/main.rs"
+
+[dependencies]
+kumir-core.workspace = true
