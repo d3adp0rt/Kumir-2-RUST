@@ -1,0 +1,49 @@
+name: repack-release-license
+
+on:
+  push:
+    branches: [license-repack]
+
+permissions:
+  contents: write
+
+jobs:
+  repack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p assets work/linux work/windows
+          gh release download v3.0.8 --dir assets
+          rm -f assets/*.apk assets/*.idsig
+          ls -lh assets
+
+      - name: Replace LICENSE.md in archives
+        run: |
+          set -euo pipefail
+
+          linux_archive="$(ls assets/*linux*.tar.gz)"
+          tar -xzf "$linux_archive" -C work/linux
+          find work/linux -name LICENSE.md -exec cp LICENSE.md {} \;
+          linux_top="$(ls work/linux)"
+          rm -f "$linux_archive"
+          tar -C work/linux -czf "$linux_archive" "$linux_top"
+
+          windows_archive="$(ls assets/*windows*.zip)"
+          unzip -q "$windows_archive" -d work/windows
+          find work/windows -name LICENSE.md -exec cp LICENSE.md {} \;
+          windows_top="$(ls work/windows)"
+          rm -f "$windows_archive"
+          (cd work/windows && zip -1 -rq "$GITHUB_WORKSPACE/$windows_archive" "$windows_top")
+
+          ls -lh assets
+
+      - name: Upload updated assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload v3.0.8 assets/*.tar.gz assets/*.zip --clobber
