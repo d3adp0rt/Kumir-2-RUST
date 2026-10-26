@@ -22,6 +22,25 @@ dist/
 Версия берётся из `[workspace.package] version` в `Cargo.toml`; отдельно её
 менять в манифесте Android не нужно.
 
+## Зависимости ядра
+
+`kumir-core` использует только две внешние библиотеки: `encoding_rs`
+(Windows-1251) и `png` (формат листа Рисователя).  GUI — `eframe`/`egui`
+0.37; на Linux нужны `libxkbcommon`, `wayland`, `libx11` и `libGL`, на
+Android — `GameActivity` и `jni`.
+
+## Настройки
+
+IDE сохраняет настройки и цветовую схему в `kumir.conf`:
+
+| Система | Путь |
+|---|---|
+| Linux/macOS | `$XDG_CONFIG_HOME/kumir/kumir.conf`, `~/.config/kumir/kumir.conf` или `~/Library/Application Support/kumir/kumir.conf` |
+| Windows | `%APPDATA%\Kumir\kumir.conf` |
+| Android | внутренний каталог приложения, `config/kumir.conf` |
+
+Удаление файла возвращает настройки по умолчанию.
+
 ## Цели Rust
 
 | Платформа | Цель Rust | Команда | Результат |

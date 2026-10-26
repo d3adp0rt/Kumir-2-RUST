@@ -81,7 +81,7 @@ impl RunShared {
 
     pub fn stop(&self) {
         self.stop.store(true, Ordering::SeqCst);
-        let _ = self.cv.notify_all();
+        self.cv.notify_all();
     }
 
     pub fn is_paused(&self) -> bool {

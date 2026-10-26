@@ -371,11 +371,7 @@ impl<'a> Lexer<'a> {
         if self.peek() == Some('\u{feff}') {
             self.bump();
         }
-        loop {
-            let ch = match self.peek() {
-                Some(c) => c,
-                None => break,
-            };
+        while let Some(ch) = self.peek() {
             if ch == '\n' {
                 let start = self.pos;
                 let line = self.line;
@@ -592,11 +588,7 @@ impl<'a> Lexer<'a> {
             }
 
             // Operators and punctuation.
-            let two = {
-                let a = self.peek();
-                let b = self.peek_at(1);
-                a.zip(b).map(|(a, b)| (a, b))
-            };
+            let two = self.peek().zip(self.peek_at(1));
             let op2 = match two {
                 Some((':', '=')) => Some((Op::Assign, 2)),
                 Some(('*', '*')) => Some((Op::Power, 2)),

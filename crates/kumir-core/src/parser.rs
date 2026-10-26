@@ -88,6 +88,12 @@ fn is_builtin_module(name: &str) -> bool {
         || n.contains("draw")
         || n.contains("рисователь")
         || n.contains("painter")
+        || n.contains("водолей")
+        || n.contains("vodoley")
+        || n.contains("кузнечик")
+        || n.contains("grasshopper")
+        || n.contains("клавиатур")
+        || n.contains("keyboard")
         || n.contains("_colorer")
         || n.contains("colorer")
         || n.contains("комплексные")
@@ -182,7 +188,7 @@ pub fn parse(src: &str) -> Result<Program, Vec<Diagnostic>> {
     parse_source(src, "<программа>", None)
 }
 
-fn expand_includes(src: &str, name: &str, dir: &Path, depth: usize) -> String {
+fn expand_includes(src: &str, _name: &str, dir: &Path, depth: usize) -> String {
     if depth > 16 {
         return src.to_string();
     }
@@ -205,7 +211,7 @@ fn expand_includes(src: &str, name: &str, dir: &Path, depth: usize) -> String {
                     let rel = &path_part[1..1 + end];
                     let path = dir.join(rel);
                     if let Ok(text) = std::fs::read_to_string(&path) {
-                        out.push_str(&expand_includes(&text, name, dir, depth + 1));
+                        out.push_str(&expand_includes(&text, _name, dir, depth + 1));
                         out.push('\n');
                         continue;
                     }
@@ -438,11 +444,15 @@ impl Parser {
         result
     }
 
-    fn known_callables(&self) -> impl Iterator<Item = &str> {
-        self.alg_names
-            .iter()
-            .map(|s| s.as_str())
-            .chain(builtins::known_names().iter().copied())
+    fn known_callables<'a>(&'a self) -> Vec<&'a str> {
+        let mut names: Vec<&'a str> = self.alg_names.iter().map(|s| s.as_str()).collect();
+        for name in builtins::known_names() {
+            names.push(name);
+        }
+        for name in crate::actors::commands::names() {
+            names.push(name);
+        }
+        names
     }
 
     // ------------------------------------------------------------------
@@ -823,6 +833,9 @@ impl Parser {
                 })
             }
             _ => {
+                if let Some(command) = self.try_parse_command_without_parens() {
+                    return command;
+                }
                 let lhs = self.parse_expr()?;
                 if self.eat_op(Op::Assign) {
                     let lv = expr_to_lvalue(lhs)?;
@@ -839,6 +852,95 @@ impl Parser {
                 }
             }
         }
+    }
+
+    /// Kumir manuals write actor commands without parentheses:
+    /// `вперед 3`, `наполни A`, `перелей из A в B`.  Multi-word and
+    /// zero-argument commands are already handled by the usual identifier
+    /// parser; this helper accepts a command followed by its arguments on the
+    /// same line, e.g. `вперед 3` or `линия 0, 0, 10, 10`.
+    fn try_parse_command_without_parens(&mut self) -> Option<PResult<Stmt>> {
+        let start = self.pos;
+        let line = self.line();
+        let mut run: Vec<String> = Vec::new();
+        let mut i = start;
+        while i < self.tokens.len() {
+            match &self.tokens[i].kind {
+                Tok::Ident(s) => {
+                    run.push(s.clone());
+                    i += 1;
+                }
+                Tok::Kw(Kw::TypeFile) if !run.is_empty() => {
+                    run.push("файл".to_string());
+                    i += 1;
+                }
+                _ => break,
+            }
+        }
+        if run.is_empty() {
+            return None;
+        }
+        let mut chosen = None;
+        for take in (1..=run.len()).rev() {
+            let candidate = normalize_name(&run[..take].join(" "));
+            let specs = crate::actors::commands::lookup_all(&candidate);
+            if specs
+                .iter()
+                .any(|s| s.actor != crate::actors::ActorKind::None && !s.args.is_empty())
+            {
+                let argc = specs.iter().map(|s| s.args.len()).max().unwrap_or(0);
+                chosen = Some((take, candidate, argc));
+                break;
+            }
+        }
+        let (take, name, argc) = chosen?;
+        let arg_start = start + take;
+        if arg_start >= self.tokens.len() {
+            return None;
+        }
+        if matches!(
+            self.tokens[arg_start].kind,
+            Tok::Newline | Tok::Eof | Tok::Comment(_)
+        ) {
+            return None;
+        }
+        if self.tokens[arg_start].is_op(Op::Assign)
+            || self.tokens[arg_start].is_op(Op::LBracket)
+            || self.tokens[arg_start].is_op(Op::LParen)
+        {
+            return None;
+        }
+        self.pos = arg_start;
+        let mut args = Vec::new();
+        for k in 0..argc {
+            let before = self.pos;
+            let arg = match self.parse_expr() {
+                Ok(expr) => expr,
+                Err(_) => {
+                    self.pos = start;
+                    return None;
+                }
+            };
+            if self.pos == before {
+                self.pos = start;
+                return None;
+            }
+            args.push(arg);
+            if k + 1 < argc {
+                let _ = self.eat_op(Op::Comma);
+            }
+        }
+        if self.eat_op(Op::Assign) {
+            self.pos = start;
+            return None;
+        }
+        Some(Ok(Stmt {
+            kind: StmtKind::Expr(Expr {
+                kind: ExprKind::Call(name, args),
+                line,
+            }),
+            line,
+        }))
     }
 
     fn parse_output(&mut self) -> PResult<Stmt> {
@@ -1343,6 +1445,7 @@ impl Parser {
                 let candidate = normalize_name(&run[..take].join(" "));
                 if self
                     .known_callables()
+                    .into_iter()
                     .any(|n| normalize_name(n) == candidate)
                 {
                     matched = Some(take);
@@ -1393,6 +1496,7 @@ impl Parser {
                 let candidate = normalize_name(&run[..take].join(" "));
                 if self
                     .known_callables()
+                    .into_iter()
                     .any(|n| normalize_name(n) == candidate)
                 {
                     bare_call = Some(take);

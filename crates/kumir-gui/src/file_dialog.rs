@@ -81,7 +81,12 @@ impl FileDialog {
                 .and_then(|e| e.to_str())
                 .unwrap_or_default()
                 .to_ascii_lowercase();
-            if !is_dir && !matches!(ext.as_str(), "kum" | "kod" | "fil" | "txt" | "md") {
+            if !is_dir
+                && !matches!(
+                    ext.as_str(),
+                    "kum" | "kod" | "fil" | "txt" | "md" | "vod" | "kz" | "png" | "svg"
+                )
+            {
                 continue;
             }
             let e = Entry { path, name, is_dir };
@@ -91,8 +96,8 @@ impl FileDialog {
                 files.push(e);
             }
         }
-        dirs.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-        files.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        dirs.sort_by_key(|a| a.name.to_lowercase());
+        files.sort_by_key(|a| a.name.to_lowercase());
         self.entries = dirs;
         self.entries.extend(files);
         self.need_refresh = false;
@@ -167,10 +172,27 @@ impl FileDialog {
                     }
                 });
                 ui.horizontal(|ui| {
-                    if ui.button("⬆").on_hover_text("Выше").clicked() {
+                    if crate::ui::icon_button(
+                        ui,
+                        palette,
+                        crate::icons::Icon::FolderUp,
+                        false,
+                        true,
+                        "Выше",
+                    )
+                    .clicked()
+                    {
                         self.go_up();
                     }
-                    if ui.button("🏠").on_hover_text("Домашний каталог").clicked()
+                    if crate::ui::icon_button(
+                        ui,
+                        palette,
+                        crate::icons::Icon::FolderOpen,
+                        false,
+                        true,
+                        "Домашний каталог",
+                    )
+                    .clicked()
                     {
                         let home = std::env::var_os("HOME")
                             .map(PathBuf::from)
@@ -203,10 +225,16 @@ impl FileDialog {
                     .max_height(list_height)
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        if ui
-                            .selectable_label(false, "📁  ..")
-                            .on_hover_text("Родительский каталог")
-                            .clicked()
+                        if crate::ui::list_row(
+                            ui,
+                            palette,
+                            crate::icons::Icon::FolderUp,
+                            "..",
+                            false,
+                            true,
+                        )
+                        .on_hover_text("Родительский каталог")
+                        .clicked()
                         {
                             self.go_up();
                         }
@@ -216,13 +244,14 @@ impl FileDialog {
                             .map(|e| (e.path.clone(), e.name.clone(), e.is_dir))
                             .collect();
                         for (path, name, is_dir) in entries {
-                            let label = if is_dir {
-                                format!("📁  {name}")
-                            } else {
-                                format!("📄  {name}")
-                            };
                             let selected = !is_dir && self.dir.join(&self.filename) == path;
-                            let resp = ui.selectable_label(selected, label);
+                            let icon = if is_dir {
+                                crate::icons::Icon::Folder
+                            } else {
+                                crate::icons::Icon::File
+                            };
+                            let resp =
+                                crate::ui::list_row(ui, palette, icon, &name, selected, false);
                             if resp.clicked() {
                                 if is_dir {
                                     if resp.double_clicked() {

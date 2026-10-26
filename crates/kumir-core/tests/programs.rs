@@ -193,7 +193,7 @@ fn robot_actor_basics() {
     .unwrap();
     assert_eq!(host.output, "да да");
     let st = state.lock().unwrap();
-    assert_eq!(st.kind, ActorKind::Robot);
+    assert_eq!(st.kind(), ActorKind::Robot);
     assert_eq!((st.robot.robot_x, st.robot.robot_y), (0, 1));
     assert!(st.robot.current().color);
 }
@@ -431,4 +431,173 @@ fn robot_field_serialization_roundtrip() {
         }
     }
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn vodoley_program_from_manual() {
+    use kumir_core::actors::ActorState;
+    use std::sync::{Arc, Mutex};
+    let src = "использовать Водолей\nалг\nнач\nнаполни B\nперелей из B в A\nнаполни B\nперелей из B в A\nкон\n";
+    let program = parse(src).unwrap();
+    let state = Arc::new(Mutex::new(ActorState::for_modules(&program.modules)));
+    {
+        let mut st = state.lock().unwrap();
+        st.vodoley.set_task([5, 3, 0], [0, 0, 0], 1);
+    }
+    let mut host = TestHost {
+        input: VecDeque::new(),
+        output: String::new(),
+    };
+    kumir_core::run(
+        &program,
+        &mut host,
+        RunOptions {
+            actor: Some(state.clone()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let st = state.lock().unwrap();
+    assert_eq!(st.vodoley.fill, [5, 1, 0]);
+    assert!(st.vodoley.solved());
+    assert_eq!(st.kind(), kumir_core::ActorKind::Vodoley);
+}
+
+#[test]
+fn grasshopper_commands_without_parentheses() {
+    use kumir_core::actors::ActorState;
+    use std::sync::{Arc, Mutex};
+    let src =
+        "использовать Кузнечик\nалг\nнач\nнц 3 раз\nвперед 3\nназад 2\nкц\nперекрасить\nкон\n";
+    let program = parse(src).unwrap();
+    let state = Arc::new(Mutex::new(ActorState::for_modules(&program.modules)));
+    {
+        let mut st = state.lock().unwrap();
+        st.grasshopper.set_task(3, 2, 0, None, vec![3]);
+    }
+    let mut host = TestHost {
+        input: VecDeque::new(),
+        output: String::new(),
+    };
+    kumir_core::run(
+        &program,
+        &mut host,
+        RunOptions {
+            actor: Some(state.clone()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let st = state.lock().unwrap();
+    assert_eq!(st.grasshopper.pos, 3);
+    assert_eq!(st.grasshopper.painted, vec![3]);
+}
+
+#[test]
+fn painter_program_draws_on_sheet() {
+    use kumir_core::actors::ActorState;
+    use std::sync::{Arc, Mutex};
+    let src = "использовать Рисователь\nалг\nнач\nперо(2, 'синий')\nлиния(60, 180, 20, 140)\nкисть('жёлтый')\nпрямоугольник(60, 120, 100, 140)\nкон\n";
+    let program = parse(src).unwrap();
+    let state = Arc::new(Mutex::new(ActorState::for_modules(&program.modules)));
+    let mut host = TestHost {
+        input: VecDeque::new(),
+        output: String::new(),
+    };
+    kumir_core::run(
+        &program,
+        &mut host,
+        RunOptions {
+            actor: Some(state.clone()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let st = state.lock().unwrap();
+    assert_eq!(st.painter.page.width, 640);
+    // A pixel on the line and a pixel inside the filled rectangle.
+    assert_ne!(
+        st.painter.page.pixel(40, 160),
+        Some(kumir_core::actors::Rgba::WHITE)
+    );
+    assert_eq!(
+        st.painter.page.pixel(80, 130),
+        Some(kumir_core::actors::Rgba::rgb(255, 255, 0))
+    );
+}
+
+#[test]
+fn several_actors_work_together() {
+    use kumir_core::actors::ActorState;
+    use std::sync::{Arc, Mutex};
+    let src = "использовать Робот\nиспользовать Черепаха\nалг\nнач\nвправо\nвперед(10)\nкон\n";
+    let program = parse(src).unwrap();
+    let state = Arc::new(Mutex::new(ActorState::for_modules(&program.modules)));
+    let mut host = TestHost {
+        input: VecDeque::new(),
+        output: String::new(),
+    };
+    kumir_core::run(
+        &program,
+        &mut host,
+        RunOptions {
+            actor: Some(state.clone()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let st = state.lock().unwrap();
+    assert_eq!(st.active.len(), 2);
+    assert_eq!(st.robot.robot_x, 1);
+    assert!((st.turtle.y - 10.0).abs() < 1e-9);
+}
+
+#[test]
+fn draw_manual_aliases() {
+    use kumir_core::actors::ActorState;
+    use std::sync::{Arc, Mutex};
+    let src = "использовать Чертежник\nалг\nнач\nустановить цвет('красный')\nопустить перо\nсместиться на вектор(0, 9)\nнадпись(1, 'К')\nкон\n";
+    let program = parse(src).unwrap();
+    let state = Arc::new(Mutex::new(ActorState::for_modules(&program.modules)));
+    let mut host = TestHost {
+        input: VecDeque::new(),
+        output: String::new(),
+    };
+    kumir_core::run(
+        &program,
+        &mut host,
+        RunOptions {
+            actor: Some(state.clone()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let st = state.lock().unwrap();
+    assert_eq!(st.draw.captions.len(), 1);
+    assert_eq!(st.draw.captions[0].text, "К");
+    assert_eq!(st.draw.color, kumir_core::actors::Rgba::rgb(255, 0, 0));
+}
+
+#[test]
+fn all_examples_parse() {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    let mut checked = 0;
+    for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("kum") {
+            continue;
+        }
+        let text = kumir_core::KumFile::load(&path)
+            .unwrap()
+            .source_for_compilation();
+        match parse(&text) {
+            Ok(_) => checked += 1,
+            Err(errors) => panic!(
+                "{}: {:?}",
+                path.display(),
+                errors.iter().map(|e| e.to_string()).collect::<Vec<_>>()
+            ),
+        }
+    }
+    assert!(checked >= 8, "expected at least 8 examples, got {checked}");
 }

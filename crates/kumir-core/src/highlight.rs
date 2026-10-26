@@ -63,6 +63,7 @@ pub fn highlight(source: &str) -> Vec<HighlightSpan> {
                 } else if crate::builtins::known_names()
                     .iter()
                     .any(|n| crate::ast::normalize_name(n) == crate::ast::normalize_name(name))
+                    || crate::actors::commands::is_known(name)
                 {
                     HighlightKind::Builtin
                 } else {

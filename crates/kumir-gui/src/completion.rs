@@ -156,11 +156,17 @@ const MODULES: &[(&str, &str)] = &[
     ("Робот", "исполнитель Робот"),
     ("Черепаха", "исполнитель Черепаха"),
     ("Чертежник", "исполнитель Чертежник"),
+    ("Водолей", "исполнитель Водолей"),
+    ("Кузнечик", "исполнитель Кузнечик"),
+    ("Рисователь", "исполнитель Рисователь"),
     ("Files", "file operations"),
     ("String Utilities", "string operations"),
     ("Robot", "Robot actor"),
-    ("turtle", "Turtle actor"),
+    ("Turtle", "Turtle actor"),
     ("Draw", "Draw actor"),
+    ("Vodoley", "Vodoley actor"),
+    ("Grasshopper", "Grasshopper actor"),
+    ("Painter", "Painter actor"),
 ];
 
 fn add_unique(items: &mut Vec<Item>, seen: &mut HashSet<String>, item: Item) {
@@ -261,6 +267,20 @@ pub fn suggest(prefix: &str, program: Option<&Program>) -> Vec<Item> {
                 text: (*name).to_string(),
                 kind: Kind::Module,
                 detail: (*detail).to_string(),
+            },
+        );
+    }
+    for spec in kumir_core::actors::commands::COMMANDS
+        .iter()
+        .chain(kumir_core::actors::commands::COLOR_COMMANDS.iter())
+    {
+        add_unique(
+            &mut items,
+            &mut seen,
+            Item {
+                text: spec.ru.to_string(),
+                kind: Kind::Function,
+                detail: format!("{}: {}", spec.signature(), spec.doc),
             },
         );
     }

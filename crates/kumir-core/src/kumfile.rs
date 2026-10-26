@@ -27,6 +27,7 @@ pub struct KumFile {
 }
 
 impl KumFile {
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(text: &str) -> Self {
         let mut text = text.to_string();
         let had_bom = text.starts_with('\u{feff}');

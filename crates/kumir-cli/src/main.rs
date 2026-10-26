@@ -246,7 +246,6 @@ fn main() -> ExitCode {
             actor: Some(actor.clone()),
             evaluate,
             actor_delay: std::time::Duration::from_millis(actor_delay_ms),
-            ..Default::default()
         },
     ) {
         Ok(outcome) => {
@@ -258,15 +257,16 @@ fn main() -> ExitCode {
                 eprintln!("Оценка: {mark}");
             }
             if let Ok(st) = actor.lock() {
-                match st.kind {
-                    kumir_core::actors::ActorKind::None => {}
-                    kumir_core::actors::ActorKind::Robot => {
-                        eprintln!(
-                            "Робот: ({}, {}) на поле {}×{}",
-                            st.robot.robot_x, st.robot.robot_y, st.robot.width, st.robot.height
-                        );
+                for kind in &st.active {
+                    match kind {
+                        kumir_core::actors::ActorKind::Robot => {
+                            eprintln!(
+                                "Робот: ({}, {}) на поле {}×{}",
+                                st.robot.robot_x, st.robot.robot_y, st.robot.width, st.robot.height
+                            );
+                        }
+                        k => eprintln!("Исполнитель: {}", k.russian_name()),
                     }
-                    k => eprintln!("Исполнитель: {}", k.russian_name()),
                 }
             }
             ExitCode::SUCCESS

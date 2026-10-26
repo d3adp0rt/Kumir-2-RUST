@@ -1,0 +1,9 @@
+;Step forward Step Back
+3 5
+;StartPos
+0
+;Left border Right border
+-5 5
+;Flags
+3 7
+;END

@@ -1285,6 +1285,7 @@ name = "kumir-core"
 version = "3.0.8"
 dependencies = [
  "encoding_rs",
+ "png",
 ]
 
 [[package]]

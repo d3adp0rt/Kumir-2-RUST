@@ -1,8 +1,14 @@
 mod app;
 mod completion;
+mod editing;
 mod file_dialog;
+mod help;
+mod icons;
+mod markdown;
 mod runner;
+mod settings;
 mod theme;
+mod ui;
 
 const APP_TITLE: &str = "КуМир";
 
@@ -383,6 +389,165 @@ pub mod android_platform {
     }
 
     /// Каталог по умолчанию для «Сохранить/Открыть» на Android.
+    pub fn config_dir() -> Option<std::path::PathBuf> {
+        let app = APP.get()?;
+        app.internal_data_path().map(|p| p.join("config"))
+    }
+
+    /// Text from the Android system clipboard.
+    pub fn clipboard_text() -> Option<String> {
+        let app = APP.get()?.clone();
+        let vm = jni::JavaVM::singleton().ok()?;
+        let result: jni::errors::Result<Option<String>> = vm.attach_current_thread(|env| {
+            let activity = activity_object(&app, env);
+            let service = env.new_string("clipboard")?;
+            let manager = env
+                .call_method(
+                    &activity,
+                    jni::jni_str!("getSystemService"),
+                    jni::jni_sig!("(Ljava/lang/String;)Ljava/lang/Object;"),
+                    &[jni::JValue::Object(&service)],
+                )?
+                .l()?;
+            if manager.is_null() {
+                return Ok(None);
+            }
+            let clip = env
+                .call_method(
+                    &manager,
+                    jni::jni_str!("getPrimaryClip"),
+                    jni::jni_sig!("()Landroid/content/ClipData;"),
+                    &[],
+                )?
+                .l()?;
+            if clip.is_null() {
+                return Ok(None);
+            }
+            let count = env
+                .call_method(
+                    &clip,
+                    jni::jni_str!("getItemCount"),
+                    jni::jni_sig!("()I"),
+                    &[],
+                )?
+                .i()?;
+            if count <= 0 {
+                return Ok(None);
+            }
+            let item = env
+                .call_method(
+                    &clip,
+                    jni::jni_str!("getItemAt"),
+                    jni::jni_sig!("(I)Landroid/content/ClipData$Item;"),
+                    &[jni::JValue::Int(0)],
+                )?
+                .l()?;
+            if item.is_null() {
+                return Ok(None);
+            }
+            let text = env
+                .call_method(
+                    &item,
+                    jni::jni_str!("getText"),
+                    jni::jni_sig!("()Ljava/lang/CharSequence;"),
+                    &[],
+                )?
+                .l()?;
+            if text.is_null() {
+                return Ok(None);
+            }
+            let string = env
+                .call_method(
+                    &text,
+                    jni::jni_str!("toString"),
+                    jni::jni_sig!("()Ljava/lang/String;"),
+                    &[],
+                )?
+                .l()?;
+            if string.is_null() {
+                return Ok(None);
+            }
+            let string = unsafe { jni::objects::JString::from_raw(env, string.into_raw()) };
+            Ok(Some(string.try_to_string(env)?))
+        });
+        match result {
+            Ok(text) => text,
+            Err(err) => {
+                log::warn!("clipboard read failed: {err}");
+                None
+            }
+        }
+    }
+
+    /// Put text into the Android system clipboard.
+    pub fn set_clipboard_text(text: &str) -> bool {
+        let Some(app) = APP.get().cloned() else {
+            return false;
+        };
+        let Ok(vm) = jni::JavaVM::singleton() else {
+            return false;
+        };
+        let result: jni::errors::Result<bool> = vm.attach_current_thread(|env| {
+            let activity = activity_object(&app, env);
+            let service = env.new_string("clipboard")?;
+            let manager = env
+                .call_method(
+                    &activity,
+                    jni::jni_str!("getSystemService"),
+                    jni::jni_sig!("(Ljava/lang/String;)Ljava/lang/Object;"),
+                    &[jni::JValue::Object(&service)],
+                )?
+                .l()?;
+            if manager.is_null() {
+                return Ok(false);
+            }
+            let label = env.new_string("КуМир")?;
+            let value = env.new_string(text)?;
+            let clip = env
+                .call_static_method(
+                    jni::jni_str!("android/content/ClipData"),
+                    jni::jni_str!("newPlainText"),
+                    jni::jni_sig!("(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Landroid/content/ClipData;"),
+                    &[
+                        jni::JValue::Object(&label),
+                        jni::JValue::Object(&value),
+                    ],
+                )?
+                .l()?;
+            env.call_method(
+                &manager,
+                jni::jni_str!("setPrimaryClip"),
+                jni::jni_sig!("(Landroid/content/ClipData;)V"),
+                &[jni::JValue::Object(&clip)],
+            )?;
+            Ok(true)
+        });
+        result.unwrap_or(false)
+    }
+
+    /// Forward egui's copy commands to the Android clipboard.
+    pub fn sync_clipboard(ctx: &egui::Context) {
+        use std::sync::Mutex;
+        static LAST: Mutex<Option<String>> = Mutex::new(None);
+        let texts: Vec<String> = ctx.output(|out| {
+            out.commands
+                .iter()
+                .filter_map(|command| match command {
+                    egui::OutputCommand::CopyText(text) => Some(text.clone()),
+                    _ => None,
+                })
+                .collect()
+        });
+        for text in texts {
+            let mut last = LAST.lock().unwrap();
+            if last.as_deref() != Some(text.as_str()) {
+                *last = Some(text.clone());
+                drop(last);
+                set_clipboard_text(&text);
+            }
+        }
+    }
+
     pub fn storage_dir() -> Option<std::path::PathBuf> {
         let app = APP.get()?.clone();
         let vm = jni::JavaVM::singleton().ok()?;
@@ -630,4 +795,14 @@ mod android_platform {
     pub fn storage_dir() -> Option<std::path::PathBuf> {
         None
     }
+    pub fn config_dir() -> Option<std::path::PathBuf> {
+        None
+    }
+    pub fn clipboard_text() -> Option<String> {
+        None
+    }
+    pub fn set_clipboard_text(_text: &str) -> bool {
+        false
+    }
+    pub fn sync_clipboard(_ctx: &egui::Context) {}
 }

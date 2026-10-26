@@ -64,7 +64,7 @@ stage_common() {
     local stage="$1"
     cp README.md LICENSE.md "$stage/"
     mkdir -p "$stage/examples" "$stage/docs"
-    cp examples/*.kum "$stage/examples/"
+    cp examples/* "$stage/examples/"
     find docs -maxdepth 1 -type f \( -name '*.md' -o -name '*.png' \) \
         -exec cp {} "$stage/docs/" \;
 }

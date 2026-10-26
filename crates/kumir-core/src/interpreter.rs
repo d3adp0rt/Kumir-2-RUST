@@ -10,13 +10,34 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::actors::{ActorKind, ActorState};
+use crate::actors::{self, ActorKind, ActorState, ArgType};
 use crate::ast::*;
 use crate::builtins;
 use crate::diag::RuntimeError;
 use crate::value::{coerce, compare_values, new_cell, values_equal, Array, Cell, Value};
 
 pub const STOP_MESSAGE: &str = "Выполнение остановлено пользователем";
+
+/// Commands that change the visible state of an actor; the IDE delays after
+/// them to make the execution smooth.
+fn actor_command_is_visual(spec: &actors::CommandSpec) -> bool {
+    match spec.actor {
+        ActorKind::Robot => matches!(spec.ru, "вверх" | "вниз" | "влево" | "вправо" | "закрасить"),
+        ActorKind::Turtle => matches!(spec.ru, "вперед" | "назад" | "влево" | "вправо"),
+        ActorKind::Draw => matches!(
+            spec.ru,
+            "опустить перо"
+                | "поднять перо"
+                | "сместиться в точку"
+                | "сместиться на вектор"
+                | "написать"
+                | "надпись"
+        ),
+        ActorKind::Grasshopper => matches!(spec.ru, "вперед" | "назад" | "перекрасить"),
+        ActorKind::Vodoley => true,
+        ActorKind::Painter | ActorKind::None => false,
+    }
+}
 
 /// Interface between the interpreter and the environment (terminal or IDE).
 pub trait Host {
@@ -143,7 +164,11 @@ impl Rng {
     }
 
     fn rrand(&mut self, a: f64, b: f64, line: u32) -> Result<f64, RuntimeError> {
-        if !(a <= b) {
+        let ordered = matches!(
+            a.partial_cmp(&b),
+            Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+        );
+        if !ordered {
             return Err(RuntimeError::new(line, "Неверный диапазон чисел"));
         }
         Ok(a + self.unit() * (b - a))
@@ -1365,9 +1390,7 @@ impl<'a> Interpreter<'a> {
 
     fn resolve_path(&self, name: &str) -> PathBuf {
         let p = Path::new(name);
-        if p.is_absolute() {
-            p.to_path_buf()
-        } else if self.options.source_dir.as_os_str().is_empty() {
+        if p.is_absolute() || self.options.source_dir.as_os_str().is_empty() {
             p.to_path_buf()
         } else {
             self.options.source_dir.join(p)
@@ -1482,453 +1505,109 @@ impl<'a> Interpreter<'a> {
         args: &[Expr],
         line: u32,
     ) -> Option<Result<Value, RuntimeError>> {
-        let kind = {
-            let actor = self.actor.lock().ok()?;
-            actor.kind
+        let active = match self.actor.lock() {
+            Ok(actor) => actor.active.clone(),
+            Err(_) => return Some(Err(RuntimeError::new(line, "Ошибка доступа к исполнителю"))),
         };
-        let robot_cmd = matches!(
-            name,
-            "вверх"
-                | "вниз"
-                | "влево"
-                | "вправо"
-                | "закрасить"
-                | "сверху стена"
-                | "снизу стена"
-                | "слева стена"
-                | "справа стена"
-                | "сверху свободно"
-                | "снизу свободно"
-                | "слева свободно"
-                | "справа свободно"
-                | "клетка закрашена"
-                | "клетка чистая"
-                | "радиация"
-                | "температура"
-                | "@@размер поля"
-                | "@@метка"
-                | "@@закрашена"
-                | "@@робот"
-                | "@@верхняя буква"
-                | "@@нижняя буква"
-                | "@@температура"
-                | "@@радиация"
-                | "go up"
-                | "go down"
-                | "go left"
-                | "go right"
-                | "do paint"
-                | "is wall at top"
-                | "is wall at bottom"
-                | "is wall at left"
-                | "is wall at right"
-                | "is free at top"
-                | "is free at bottom"
-                | "is free at left"
-                | "is free at right"
-                | "is Color"
-                | "is Clear"
-                | "radiation"
-                | "temperature"
-                | "field size"
-                | "mark"
-                | "colored"
-                | "robot pos"
-                | "upChar"
-                | "downChar"
-                | "cellTemp"
-                | "cellRad"
-        );
-        let turtle_cmd = matches!(
-            name,
-            "поднять хвост"
-                | "опустить хвост"
-                | "вперед"
-                | "назад"
-                | "влево"
-                | "вправо"
-                | "выбрать чернила"
-                | "tailUp"
-                | "tailDown"
-                | "forward"
-                | "back"
-                | "left"
-                | "right"
-                | "set pen color"
-        );
-        let draw_cmd = matches!(
-            name,
-            "опустить перо"
-                | "поднять перо"
-                | "выбрать чернила"
-                | "сместиться в точку"
-                | "сместиться на вектор"
-                | "написать"
-                | "@есть отрезок в области"
-                | "setup pen"
-                | "release pen"
-                | "set pen color"
-                | "move to"
-                | "move by"
-                | "add caption"
-                | "@is line at circle"
-        );
-        if !robot_cmd && !turtle_cmd && !draw_cmd {
-            return None;
-        }
-        if kind == ActorKind::None {
+        let spec = actors::lookup_for(name, &active, args.len())?;
+        if spec.actor != ActorKind::None && !active.contains(&spec.actor) {
             return Some(Err(RuntimeError::new(
                 line,
                 format!(
-                    "Команда «{name}» недоступна: не подключён исполнитель (используйте «использовать Робот», «использовать Черепаха» или «использовать Чертежник»)"
+                    "Команда «{name}» недоступна: не подключён исполнитель «{}» (добавьте строку «использовать {}»)",
+                    spec.actor.russian_name(),
+                    spec.actor.module_name()
+                ),
+            )));
+        }
+        if args.len() != spec.args.len() {
+            return Some(Err(RuntimeError::new(
+                line,
+                format!(
+                    "Команда «{}» ожидает {} аргумент(ов), передано {}",
+                    spec.ru,
+                    spec.args.len(),
+                    args.len()
                 ),
             )));
         }
 
-        // Evaluate all ordinary arguments before locking the actor state, so
-        // the interpreter can still call user algorithms from an argument.
-        let mut d1 = 0.0f64;
-        let mut d2 = 0.0f64;
-        let mut color = String::new();
-        let mut cell_args = (0i32, 0i32);
-        let mut text = String::new();
-        let numeric1 = kind == ActorKind::Turtle
-            && matches!(
-                name,
-                "вперед"
-                    | "назад"
-                    | "влево"
-                    | "вправо"
-                    | "forward"
-                    | "back"
-                    | "left"
-                    | "right"
-            );
-        let numeric2 = kind == ActorKind::Draw
-            && matches!(
-                name,
-                "сместиться в точку" | "сместиться на вектор" | "move to" | "move by"
-            );
-        let color_cmd = matches!(kind, ActorKind::Turtle | ActorKind::Draw)
-            && matches!(name, "выбрать чернила" | "set pen color");
-        let cell_cmd = kind == ActorKind::Robot
-            && matches!(
-                name,
-                "@@метка"
-                    | "@@закрашена"
-                    | "@@верхняя буква"
-                    | "@@нижняя буква"
-                    | "@@температура"
-                    | "@@радиация"
-                    | "mark"
-                    | "colored"
-                    | "upChar"
-                    | "downChar"
-                    | "cellTemp"
-                    | "cellRad"
-            );
-        let caption_cmd = kind == ActorKind::Draw && matches!(name, "написать" | "add caption");
-        if numeric1 {
-            d1 = match self.eval_arg_real(args, 0, line) {
-                Ok(v) => v,
-                Err(e) => return Some(Err(e)),
+        // Evaluate arguments before taking the actor lock, so a user algorithm
+        // can still be called from an argument expression.
+        let mut values = Vec::with_capacity(args.len());
+        for (ty, expr) in spec.args.iter().zip(args.iter()) {
+            if ty.is_out() {
+                values.push(Value::Undefined);
+                continue;
+            }
+            let value = match ty {
+                ArgType::Int => match self.eval(expr).and_then(|v| v.to_int(line)) {
+                    Ok(v) => Value::Int(v),
+                    Err(e) => return Some(Err(e)),
+                },
+                ArgType::Real => match self.eval(expr).and_then(|v| v.to_real(line)) {
+                    Ok(v) => Value::Real(v),
+                    Err(e) => return Some(Err(e)),
+                },
+                ArgType::Str => match self.eval(expr).and_then(|v| v.to_string_value(line)) {
+                    Ok(v) => Value::Str(v),
+                    Err(e) => return Some(Err(e)),
+                },
+                ArgType::Bool => match self.eval(expr).and_then(|v| v.to_bool(line)) {
+                    Ok(v) => Value::Bool(v),
+                    Err(e) => return Some(Err(e)),
+                },
+                ArgType::Color => match self.eval(expr) {
+                    Ok(Value::Str(s)) => Value::Str(s),
+                    Ok(Value::Char(c)) => Value::Char(c),
+                    Ok(Value::Int(v)) => Value::Int(v),
+                    Ok(Value::Real(v)) => Value::Int(v as i64),
+                    Ok(other) => {
+                        return Some(Err(RuntimeError::new(
+                            line,
+                            format!("Ожидался цвет (строка), получено «{}»", other.type_name()),
+                        )))
+                    }
+                    Err(e) => return Some(Err(e)),
+                },
+                ArgType::IntArray => match self.eval(expr) {
+                    Ok(v @ Value::Array(_)) => v,
+                    Ok(other) => {
+                        return Some(Err(RuntimeError::new(
+                            line,
+                            format!("Ожидалась таблица, получено «{}»", other.type_name()),
+                        )))
+                    }
+                    Err(e) => return Some(Err(e)),
+                },
+                _ => Value::Undefined,
             };
-        } else if numeric2 {
-            d1 = match self.eval_arg_real(args, 0, line) {
-                Ok(v) => v,
-                Err(e) => return Some(Err(e)),
-            };
-            d2 = match self.eval_arg_real(args, 1, line) {
-                Ok(v) => v,
-                Err(e) => return Some(Err(e)),
-            };
-        } else if color_cmd {
-            color = match self.eval_color(args, 0, line) {
-                Ok(v) => v,
-                Err(e) => return Some(Err(e)),
-            };
-        } else if cell_cmd {
-            cell_args = match self.eval_cell_args(args, line) {
-                Ok(v) => v,
-                Err(e) => return Some(Err(e)),
-            };
-        } else if caption_cmd {
-            text = match self.eval_arg_string(args, 1, line) {
-                Ok(v) => v,
-                Err(e) => return Some(Err(e)),
-            };
+            values.push(value);
         }
 
-        let result = (|| -> Result<Value, RuntimeError> {
-            let mut actor = self
-                .actor
-                .lock()
-                .map_err(|_| RuntimeError::new(line, "Ошибка доступа к исполнителю"))?;
-            actor.status = name.to_string();
-            match kind {
-                ActorKind::Robot => {
-                    if !robot_cmd {
-                        return Err(RuntimeError::new(
-                            line,
-                            format!("Команда «{name}» не поддерживается исполнителем Робот"),
-                        ));
-                    }
-                    match name {
-                        "вверх" | "go up" => actor
-                            .robot
-                            .move_up()
-                            .map_err(|e| RuntimeError::new(line, e))
-                            .map(|_| Value::Undefined),
-                        "вниз" | "go down" => actor
-                            .robot
-                            .move_down()
-                            .map_err(|e| RuntimeError::new(line, e))
-                            .map(|_| Value::Undefined),
-                        "влево" | "go left" => actor
-                            .robot
-                            .move_left()
-                            .map_err(|e| RuntimeError::new(line, e))
-                            .map(|_| Value::Undefined),
-                        "вправо" | "go right" => actor
-                            .robot
-                            .move_right()
-                            .map_err(|e| RuntimeError::new(line, e))
-                            .map(|_| Value::Undefined),
-                        "закрасить" | "do paint" => {
-                            actor.robot.paint();
-                            Ok(Value::Undefined)
-                        }
-                        "сверху стена" | "is wall at top" => {
-                            Ok(Value::Bool(actor.robot.wall_up()))
-                        }
-                        "снизу стена" | "is wall at bottom" => {
-                            Ok(Value::Bool(actor.robot.wall_down()))
-                        }
-                        "слева стена" | "is wall at left" => {
-                            Ok(Value::Bool(actor.robot.wall_left()))
-                        }
-                        "справа стена" | "is wall at right" => {
-                            Ok(Value::Bool(actor.robot.wall_right()))
-                        }
-                        "сверху свободно" | "is free at top" => {
-                            Ok(Value::Bool(!actor.robot.wall_up()))
-                        }
-                        "снизу свободно" | "is free at bottom" => {
-                            Ok(Value::Bool(!actor.robot.wall_down()))
-                        }
-                        "слева свободно" | "is free at left" => {
-                            Ok(Value::Bool(!actor.robot.wall_left()))
-                        }
-                        "справа свободно" | "is free at right" => {
-                            Ok(Value::Bool(!actor.robot.wall_right()))
-                        }
-                        "клетка закрашена" | "is Color" => {
-                            Ok(Value::Bool(actor.robot.current().color))
-                        }
-                        "клетка чистая" | "is Clear" => {
-                            Ok(Value::Bool(!actor.robot.current().color))
-                        }
-                        "радиация" | "radiation" => {
-                            Ok(Value::Real(actor.robot.current().radiation))
-                        }
-                        "температура" | "temperature" => {
-                            Ok(Value::Int(actor.robot.current().temperature))
-                        }
-                        "@@размер поля" | "field size" => {
-                            let rows = actor.robot.height;
-                            let cols = actor.robot.width;
-                            drop(actor);
-                            self.assign_out(args, 0, Value::Int(rows as i64), line)?;
-                            self.assign_out(args, 1, Value::Int(cols as i64), line)?;
-                            Ok(Value::Undefined)
-                        }
-                        "@@робот" | "robot pos" => {
-                            let row = actor.robot.robot_y + 1;
-                            let col = actor.robot.robot_x + 1;
-                            drop(actor);
-                            self.assign_out(args, 0, Value::Int(row as i64), line)?;
-                            self.assign_out(args, 1, Value::Int(col as i64), line)?;
-                            Ok(Value::Undefined)
-                        }
-                        "@@метка" | "mark" => {
-                            let (y, x) = cell_args;
-                            Ok(Value::Bool(
-                                actor.robot.cell(x, y).map(|c| c.point).unwrap_or(false),
-                            ))
-                        }
-                        "@@закрашена" | "colored" => {
-                            let (y, x) = cell_args;
-                            Ok(Value::Bool(
-                                actor.robot.cell(x, y).map(|c| c.color).unwrap_or(false),
-                            ))
-                        }
-                        "@@верхняя буква" | "upChar" => {
-                            let (y, x) = cell_args;
-                            Ok(Value::Char(
-                                actor.robot.cell(x, y).map(|c| c.symbol).unwrap_or('$'),
-                            ))
-                        }
-                        "@@нижняя буква" | "downChar" => {
-                            let (y, x) = cell_args;
-                            Ok(Value::Char(
-                                actor.robot.cell(x, y).map(|c| c.symbol1).unwrap_or('$'),
-                            ))
-                        }
-                        "@@температура" | "cellTemp" => {
-                            let (y, x) = cell_args;
-                            Ok(Value::Int(
-                                actor.robot.cell(x, y).map(|c| c.temperature).unwrap_or(0),
-                            ))
-                        }
-                        "@@радиация" | "cellRad" => {
-                            let (y, x) = cell_args;
-                            Ok(Value::Real(
-                                actor.robot.cell(x, y).map(|c| c.radiation).unwrap_or(0.0),
-                            ))
-                        }
-                        _ => Ok(Value::Undefined),
-                    }
+        let source_dir = self.options.source_dir.clone();
+        let result = {
+            let mut actor = match self.actor.lock() {
+                Ok(actor) => actor,
+                Err(_) => {
+                    return Some(Err(RuntimeError::new(line, "Ошибка доступа к исполнителю")))
                 }
-                ActorKind::Turtle => {
-                    if !turtle_cmd {
-                        return Err(RuntimeError::new(
-                            line,
-                            format!("Команда «{name}» не поддерживается исполнителем Черепаха"),
-                        ));
-                    }
-                    match name {
-                        "поднять хвост" | "tailUp" => {
-                            actor.turtle.pen_down = false;
-                            Ok(Value::Undefined)
-                        }
-                        "опустить хвост" | "tailDown" => {
-                            actor.turtle.pen_down = true;
-                            Ok(Value::Undefined)
-                        }
-                        "вперед" | "forward" => actor
-                            .turtle
-                            .forward(d1)
-                            .map_err(|e| RuntimeError::new(line, e))
-                            .map(|_| Value::Undefined),
-                        "назад" | "back" => actor
-                            .turtle
-                            .back(d1)
-                            .map_err(|e| RuntimeError::new(line, e))
-                            .map(|_| Value::Undefined),
-                        "влево" | "left" => {
-                            actor.turtle.turn_left(d1);
-                            Ok(Value::Undefined)
-                        }
-                        "вправо" | "right" => {
-                            actor.turtle.turn_right(d1);
-                            Ok(Value::Undefined)
-                        }
-                        "выбрать чернила" | "set pen color" => {
-                            actor.turtle.color = color;
-                            Ok(Value::Undefined)
-                        }
-                        _ => Ok(Value::Undefined),
-                    }
-                }
-                ActorKind::Draw => {
-                    if !draw_cmd {
-                        return Err(RuntimeError::new(
-                            line,
-                            format!("Команда «{name}» не поддерживается исполнителем Чертежник"),
-                        ));
-                    }
-                    match name {
-                        "опустить перо" | "setup pen" => {
-                            actor.draw.pen_down = true;
-                            Ok(Value::Undefined)
-                        }
-                        "поднять перо" | "release pen" => {
-                            actor.draw.pen_down = false;
-                            Ok(Value::Undefined)
-                        }
-                        "выбрать чернила" | "set pen color" => {
-                            actor.draw.color = color;
-                            Ok(Value::Undefined)
-                        }
-                        "сместиться в точку" | "move to" => {
-                            actor.draw.move_to(d1, d2);
-                            Ok(Value::Undefined)
-                        }
-                        "сместиться на вектор" | "move by" => {
-                            actor.draw.move_by(d1, d2);
-                            Ok(Value::Undefined)
-                        }
-                        "написать" | "add caption" => {
-                            let x = actor.draw.x;
-                            let y = actor.draw.y;
-                            actor
-                                .draw
-                                .captions
-                                .push(crate::actors::Caption { x, y, text });
-                            Ok(Value::Undefined)
-                        }
-                        "@есть отрезок в области" | "@is line at circle" => {
-                            Ok(Value::Bool(false))
-                        }
-                        _ => Ok(Value::Undefined),
-                    }
-                }
-                ActorKind::None => Ok(Value::Undefined),
+            };
+            actor.exec(spec, &values, &source_dir)
+        };
+        let result = match result {
+            Ok(result) => result,
+            Err(message) => return Some(Err(RuntimeError::new(line, message))),
+        };
+        for (index, value) in result.outs {
+            if let Err(e) = self.assign_out(args, index, value, line) {
+                return Some(Err(e));
             }
-        })();
-        let visual = matches!(
-            name,
-            "вверх"
-                | "вниз"
-                | "влево"
-                | "вправо"
-                | "закрасить"
-                | "go up"
-                | "go down"
-                | "go left"
-                | "go right"
-                | "do paint"
-                | "вперед"
-                | "назад"
-                | "forward"
-                | "back"
-                | "left"
-                | "right"
-                | "опустить перо"
-                | "поднять перо"
-                | "setup pen"
-                | "release pen"
-                | "сместиться в точку"
-                | "сместиться на вектор"
-                | "move to"
-                | "move by"
-        );
-        if visual && !self.options.actor_delay.is_zero() {
+        }
+        if actor_command_is_visual(spec) && !self.options.actor_delay.is_zero() {
             std::thread::sleep(self.options.actor_delay);
         }
-        Some(result)
-    }
-
-    fn eval_cell_args(&mut self, args: &[Expr], line: u32) -> Result<(i32, i32), RuntimeError> {
-        // Public @@-functions use 1-based row/column numbers.
-        let row = self.eval_arg_int(args, 0, line)? as i32;
-        let col = self.eval_arg_int(args, 1, line)? as i32;
-        Ok((row - 1, col - 1))
-    }
-
-    fn eval_color(&mut self, args: &[Expr], i: usize, line: u32) -> Result<String, RuntimeError> {
-        let e = args
-            .get(i)
-            .ok_or_else(|| RuntimeError::new(line, "Недостаточно аргументов"))?;
-        match self.eval(e)? {
-            Value::Str(s) => Ok(s),
-            Value::Char(c) => Ok(c.to_string()),
-            Value::Int(v) => Ok(format!("#{v:06x}")),
-            other => Err(RuntimeError::new(
-                line,
-                format!("Ожидался цвет, получено {}", other.type_name()),
-            )),
-        }
+        Some(Ok(result.value))
     }
 
     fn assign_out(
