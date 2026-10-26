@@ -207,7 +207,7 @@ make apk
 ### Подпись и версия
 
 * `versionName` — версия из `Cargo.toml`;
-* `versionCode` — `major*10000 + minor*100 + patch` (3.0.8 → 30008),
+* `versionCode` — `major*10000 + minor*100 + patch` (4.0.0 → 40000),
   переопределяется через `ANDROID_VERSION_CODE`;
 * ключ по умолчанию — `android/kumir.keystore` с паролем `kumirpass`.
 

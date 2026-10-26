@@ -1275,14 +1275,14 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
 name = "kumir-cli"
-version = "3.0.8"
+version = "4.0.0"
 dependencies = [
  "kumir-core",
 ]
 
 [[package]]
 name = "kumir-core"
-version = "3.0.8"
+version = "4.0.0"
 dependencies = [
  "encoding_rs",
  "png",
@@ -1290,7 +1290,7 @@ dependencies = [
 
 [[package]]
 name = "kumir-gui"
-version = "3.0.8"
+version = "4.0.0"
 dependencies = [
  "android_logger",
  "arboard",

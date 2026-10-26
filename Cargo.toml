@@ -4,7 +4,7 @@ default-members = ["crates/kumir-core", "crates/kumir-cli", "crates/kumir-gui"]
 resolver = "2"
 
 [workspace.package]
-version = "3.0.8"
+version = "4.0.0"
 edition = "2021"
 rust-version = "1.95"
 license = "GPL-3.0-or-later"
